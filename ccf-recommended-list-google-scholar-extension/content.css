@@ -171,3 +171,11 @@
   color: #51CF66;
   border: 1px solid rgba(81, 207, 102, 0.3);
 }
+
+/* Profile page: stats bar spans full table width */
+.ccf-stats-bar-profile {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 4px 0;
+  border-radius: 4px;
+}

@@ -320,9 +320,18 @@
       ${stats.C > 0 ? `<span class="ccf-badge ccf-badge-C" style="font-size:11px;padding:1px 6px;">C×${stats.C}</span>` : ''}
     `;
 
-    const resultsContainer = document.querySelector('#gs_res_ccl_mid') || document.querySelector('#gs_bdy');
-    if (resultsContainer) {
-      resultsContainer.insertBefore(bar, resultsContainer.firstChild);
+    // Search results page: insert at top of results container
+    const searchContainer = document.querySelector('#gs_res_ccl_mid');
+    if (searchContainer) {
+      searchContainer.insertBefore(bar, searchContainer.firstChild);
+      return;
+    }
+
+    // Profile page: insert before publications table as a sibling
+    const profileTable = document.querySelector('#gsc_a_t');
+    if (profileTable && profileTable.parentNode) {
+      bar.classList.add('ccf-stats-bar-profile');
+      profileTable.parentNode.insertBefore(bar, profileTable);
     }
   }
 
