@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+._*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build artifacts
+*.zip
+*.crx
+*.pem
+
+# Temp outputs
+*_output.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+venv/
+
+# Original PDF (copyright belongs to CCF)
+*.pdf

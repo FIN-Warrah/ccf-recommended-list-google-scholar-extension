@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CCF Rank</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      width: 340px;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: #0f0f1a;
+      color: #e0e0e0;
+      overflow: hidden;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      padding: 20px;
+      text-align: center;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .header h1 {
+      font-size: 20px;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: 1px;
+      margin-bottom: 4px;
+    }
+
+    .header .subtitle {
+      font-size: 11px;
+      color: #888;
+      letter-spacing: 0.5px;
+    }
+
+    .header .version {
+      display: inline-block;
+      background: rgba(255,255,255,0.08);
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 10px;
+      color: #aaa;
+      margin-top: 6px;
+    }
+
+    .stats-section {
+      padding: 16px 20px;
+      background: rgba(255,255,255,0.02);
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+
+    .stat-card {
+      background: rgba(255,255,255,0.04);
+      border-radius: 10px;
+      padding: 12px 8px;
+      text-align: center;
+      border: 1px solid rgba(255,255,255,0.06);
+      transition: transform 0.2s ease;
+    }
+
+    .stat-card:hover { transform: translateY(-2px); }
+
+    .stat-card .level {
+      font-size: 22px;
+      font-weight: 800;
+      margin-bottom: 2px;
+    }
+
+    .stat-card .label {
+      font-size: 10px;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .stat-card .count {
+      font-size: 14px;
+      font-weight: 600;
+      color: #ccc;
+      margin-top: 4px;
+    }
+
+    .stat-a .level { color: #FF6B35; }
+    .stat-b .level { color: #4A90D9; }
+    .stat-c .level { color: #6B9F6B; }
+
+    .info-section {
+      padding: 14px 20px;
+      border-top: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .info-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 0;
+      font-size: 12px;
+      color: #999;
+    }
+
+    .info-row .icon { font-size: 14px; }
+
+    .search-box {
+      padding: 12px 20px;
+      border-top: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .search-input {
+      width: 100%;
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.05);
+      color: #e0e0e0;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .search-input::placeholder { color: #555; }
+    .search-input:focus { border-color: rgba(74, 144, 217, 0.5); }
+
+    .search-result {
+      padding: 4px 20px 12px;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    .search-result-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      margin-bottom: 4px;
+      border-radius: 6px;
+      background: rgba(255,255,255,0.03);
+      font-size: 12px;
+      border: 1px solid rgba(255,255,255,0.04);
+    }
+
+    .search-result-item .badge-mini {
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 700;
+      color: #fff;
+      flex-shrink: 0;
+    }
+    .badge-mini-A { background: linear-gradient(135deg, #FF6B35, #F7931E); }
+    .badge-mini-B { background: linear-gradient(135deg, #4A90D9, #357ABD); }
+    .badge-mini-C { background: linear-gradient(135deg, #6B9F6B, #5A8A5A); }
+
+    .search-result-item .venue-name {
+      color: #ccc;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .search-result-item .venue-type {
+      color: #666;
+      font-size: 10px;
+      flex-shrink: 0;
+    }
+
+    .footer {
+      padding: 10px 20px;
+      text-align: center;
+      border-top: 1px solid rgba(255,255,255,0.05);
+      font-size: 10px;
+      color: #555;
+    }
+
+    .footer a {
+      color: #4A90D9;
+      text-decoration: none;
+    }
+
+    .no-results {
+      padding: 8px;
+      text-align: center;
+      color: #555;
+      font-size: 12px;
+    }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🏷️ CCF Rank</h1>
+    <div class="subtitle">中国计算机学会推荐 · 学术期刊/会议等级</div>
+    <div class="version">CCF 2026 · v1.0</div>
+  </div>
+
+  <div class="stats-section">
+    <div class="stats-grid">
+      <div class="stat-card stat-a">
+        <div class="level">A</div>
+        <div class="label">Top Venues</div>
+        <div class="count" id="count-a">--</div>
+      </div>
+      <div class="stat-card stat-b">
+        <div class="level">B</div>
+        <div class="label">Excellent</div>
+        <div class="count" id="count-b">--</div>
+      </div>
+      <div class="stat-card stat-c">
+        <div class="level">C</div>
+        <div class="label">Recognized</div>
+        <div class="count" id="count-c">--</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="search-box">
+    <input type="text" class="search-input" id="search-input" 
+           placeholder="🔍 搜索期刊/会议名称或简称..." autofocus>
+  </div>
+  <div class="search-result" id="search-result"></div>
+
+  <div class="info-section">
+    <div class="info-row">
+      <span class="icon">📋</span>
+      <span>数据来源: CCF 2026推荐目录</span>
+    </div>
+    <div class="info-row">
+      <span class="icon">🌐</span>
+      <span>支持 Google Scholar 搜索结果自动标注</span>
+    </div>
+  </div>
+
+  <div class="footer">
+    CCF Rank Extension © 2026
+  </div>
+
+  <script src="ccf_data.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "CCF Rank - 学术会议/期刊等级标注",
+  "version": "1.0.0",
+  "description": "在Google Scholar搜索结果中显示CCF推荐的国际学术期刊/会议等级(A/B/C)标签",
+  "permissions": ["storage"],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://scholar.google.com/*",
+        "https://scholar.google.com.hk/*",
+        "https://scholar.google.co.uk/*",
+        "https://scholar.google.ca/*",
+        "https://scholar.google.com.au/*",
+        "https://scholar.google.de/*",
+        "https://scholar.google.fr/*",
+        "https://scholar.google.co.jp/*",
+        "https://scholar.google.co.kr/*"
+      ],
+      "js": ["ccf_data.js", "content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

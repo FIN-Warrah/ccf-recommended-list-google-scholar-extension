@@ -1,0 +1,173 @@
+/* CCF Rank Badge Styles */
+
+.ccf-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  letter-spacing: 0.5px;
+  line-height: 18px;
+  vertical-align: middle;
+  margin-left: 6px;
+  cursor: default;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  position: relative;
+  text-decoration: none !important;
+}
+
+.ccf-badge:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* Level A - Premium Gold */
+.ccf-badge-A {
+  background: linear-gradient(135deg, #FF6B35 0%, #F7931E 100%);
+  color: #fff;
+  box-shadow: 0 1px 4px rgba(255, 107, 53, 0.3);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.15);
+}
+
+/* Level B - Cool Blue */
+.ccf-badge-B {
+  background: linear-gradient(135deg, #4A90D9 0%, #357ABD 100%);
+  color: #fff;
+  box-shadow: 0 1px 4px rgba(74, 144, 217, 0.3);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.15);
+}
+
+/* Level C - Teal */
+.ccf-badge-C {
+  background: linear-gradient(135deg, #45B8AC 0%, #3AA99E 100%);
+  color: #fff;
+  box-shadow: 0 1px 4px rgba(69, 184, 172, 0.3);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.15);
+}
+
+/* Badge type indicator */
+.ccf-badge-type {
+  font-size: 10px;
+  opacity: 0.85;
+  font-weight: 500;
+}
+
+/* Tooltip */
+.ccf-tooltip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1a1a2e;
+  color: #eee;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  white-space: nowrap;
+  z-index: 10000;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  letter-spacing: normal;
+  text-shadow: none;
+}
+
+.ccf-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: #1a1a2e;
+}
+
+.ccf-badge:hover .ccf-tooltip {
+  display: block;
+}
+
+.ccf-tooltip-level {
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.ccf-tooltip-level-A { color: #FFB347; }
+.ccf-tooltip-level-B { color: #7EC8E3; }
+.ccf-tooltip-level-C { color: #6DD8CD; }
+
+.ccf-tooltip-category {
+  color: #aaa;
+  font-size: 11px;
+}
+
+.ccf-tooltip-name {
+  color: #ddd;
+  font-size: 11px;
+  margin-top: 2px;
+  max-width: 350px;
+  white-space: normal;
+}
+
+/* Stats bar in search page */
+.ccf-stats-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  margin: 8px 0 16px 0;
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  border-radius: 8px;
+  border: 1px solid #dee2e6;
+  font-size: 13px;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  color: #495057;
+}
+
+.ccf-stats-bar .ccf-stats-icon {
+  font-size: 16px;
+}
+
+.ccf-stats-bar .ccf-stats-count {
+  font-weight: 700;
+  color: #212529;
+}
+
+.ccf-stats-bar .ccf-stats-sep {
+  width: 1px;
+  height: 16px;
+  background: #ced4da;
+}
+
+/* Change annotation tags in tooltip */
+.ccf-tooltip-change {
+  margin-top: 6px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-block;
+}
+
+.ccf-change-new {
+  background: rgba(255, 213, 0, 0.2);
+  color: #FFD500;
+  border: 1px solid rgba(255, 213, 0, 0.3);
+}
+
+.ccf-change-upgrade {
+  background: rgba(255, 76, 76, 0.2);
+  color: #FF6B6B;
+  border: 1px solid rgba(255, 76, 76, 0.3);
+}
+
+.ccf-change-rename {
+  background: rgba(81, 207, 102, 0.2);
+  color: #51CF66;
+  border: 1px solid rgba(81, 207, 102, 0.3);
+}
