@@ -10519,7 +10519,144 @@ const CCF_NAME_LOOKUP = {
     "full_name": "International Joint Conference on Theoretical Computer Science-Frontier of Algorithmic Wisdom",
     "abbr": "IJTCS-FAW",
     "change": "新增"
-  }
+  },
+  "acmsigplansymposiumonprinciplesandpracticeofparallelprogramming": {
+    "level": "A",
+    "type": "conference",
+    "category": "计算机体系结构/并行与分布计算/存储系统",
+    "full_name": "ACM SIGPLAN Symposium on Principles & Practice of Parallel Programming",
+    "abbr": "PPoPP",
+    "change": null
+  },
+  "designautomationandtestineurope": {
+    "level": "B",
+    "type": "conference",
+    "category": "计算机体系结构/并行与分布计算/存储系统",
+    "full_name": "Design, Automation & Testin Europe",
+    "abbr": "DATE",
+    "change": null
+  },
+  "ieeeinternationalparallelanddistributedprocessingsymposium": {
+    "level": "B",
+    "type": "conference",
+    "category": "计算机体系结构/并行与分布计算/存储系统",
+    "full_name": "IEEE International Parallel & Distributed Processing Symposium",
+    "abbr": "IPDPS",
+    "change": null
+  },
+  "computersandsecurity": {
+    "level": "B",
+    "type": "journal",
+    "category": "网络与信息安全",
+    "full_name": "Computers & Security",
+    "abbr": "",
+    "change": null
+  },
+  "computerlawandsecurityreview": {
+    "level": "C",
+    "type": "journal",
+    "category": "网络与信息安全",
+    "full_name": "Computer Law & Security Review",
+    "abbr": "CLSR",
+    "change": null
+  },
+  "conferenceondetectionofintrusionsandmalwareandvulnerabilityassessment": {
+    "level": "C",
+    "type": "conference",
+    "category": "网络与信息安全",
+    "full_name": "Conference on Detection of Intrusions and Malware& Vulnerability Assessment",
+    "abbr": "DIMVA",
+    "change": null
+  },
+  "internationalconferenceondigitalforensicsandcybercrime": {
+    "level": "C",
+    "type": "conference",
+    "category": "网络与信息安全",
+    "full_name": "International Conference on Digital Forensics & Cyber Crime",
+    "abbr": "ICDF2C",
+    "change": null
+  },
+  "dataandknowledgeengineering": {
+    "level": "B",
+    "type": "journal",
+    "category": "数据库/数据挖掘/内容检索",
+    "full_name": "Data & Knowledge Engineering",
+    "abbr": "DKE",
+    "change": null
+  },
+  "informationandmanagement": {
+    "level": "C",
+    "type": "journal",
+    "category": "数据库/数据挖掘/内容检索",
+    "full_name": "Information & Management",
+    "abbr": "I&M",
+    "change": null
+  },
+  "computeranimationandvirtualworlds": {
+    "level": "C",
+    "type": "journal",
+    "category": "计算机图形学与多媒体",
+    "full_name": "Computeranimation & virtualworlds",
+    "abbr": "CAVW",
+    "change": null
+  },
+  "computersandgraphics": {
+    "level": "C",
+    "type": "journal",
+    "category": "计算机图形学与多媒体",
+    "full_name": "Computers & Graphics",
+    "abbr": "C&G",
+    "change": null
+  },
+  "discreteandcomputationalgeometry": {
+    "level": "C",
+    "type": "journal",
+    "category": "计算机图形学与多媒体",
+    "full_name": "Discrete & Computational Geometry",
+    "abbr": "DCG",
+    "change": null
+  },
+  "virtualrealityandintelligenthardware": {
+    "level": "C",
+    "type": "journal",
+    "category": "计算机图形学与多媒体",
+    "full_name": "Virtual Reality & Intelligent Hardware",
+    "abbr": "VRIH",
+    "change": "新增"
+  },
+  "ieeeinternationalconferenceonmultimediaandexpo": {
+    "level": "B",
+    "type": "conference",
+    "category": "计算机图形学与多媒体",
+    "full_name": "IEEE International Conference on Multimedia & Expo",
+    "abbr": "ICME",
+    "change": null
+  },
+  "computerspeechandlanguage": {
+    "level": "C",
+    "type": "journal",
+    "category": "人工智能",
+    "full_name": "Computer Speech & Language",
+    "abbr": "",
+    "change": null
+  },
+  "behaviourandinformationtechnology": {
+    "level": "C",
+    "type": "journal",
+    "category": "人机交互与普适计算",
+    "full_name": "Behaviour & Information Technology",
+    "abbr": "BIT",
+    "change": null
+  },
+  "frontiersofinformationtechnologyandelectronicengineering": {
+    "level": "C",
+    "type": "journal",
+    "category": "交叉/综合/新兴",
+    "full_name": "Frontiers of Information Technology & Electronic Engineering",
+    "abbr": "FITEE",
+    "change": null
+  },
+
 };
 
 const CCF_KEYWORD_LOOKUP = {

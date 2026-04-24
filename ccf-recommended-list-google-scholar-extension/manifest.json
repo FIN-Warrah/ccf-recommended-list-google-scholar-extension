@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "CCF Rank - 学术会议/期刊等级标注",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "在Google Scholar搜索结果中显示CCF推荐的国际学术期刊/会议等级(A/B/C)标签",
   "permissions": ["storage"],
   "icons": {

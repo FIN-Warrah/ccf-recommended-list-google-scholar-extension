@@ -13,6 +13,8 @@
 
   let stats = { total: 0, A: 0, B: 0, C: 0 };
   let processedElements = new WeakSet();
+  let isUpdatingDOM = false;
+  let pendingResolveCount = 0; // Global pending counter for citation lookups
 
   /**
    * Normalize text for name-based lookup.
@@ -21,7 +23,8 @@
   function normalizeName(text) {
     return text
       .toLowerCase()
-      .replace(/[\s\-,:\/()'&.;]+/g, '')
+      .replace(/&/g, 'and')
+      .replace(/[\s\-,:\/()'\.;]+/g, '')
       .replace(/[^a-z0-9]/g, '')
       .trim();
   }
@@ -111,9 +114,9 @@
       parts.push(dashParts[1]);
     }
 
-    // Also split by "•" (dot separator in new layout)
-    const dotParts = text.split('•');
-    if (dotParts.length >= 1) {
+    // Also split by "•" (dot separator in new layout) — only if "•" actually exists
+    if (text.includes('•')) {
+      const dotParts = text.split('•');
       parts.push(dotParts[0]);
     }
 
@@ -123,8 +126,12 @@
       return p.replace(/,\s*\d{4}\b.*$/, '').trim();
     });
 
-    // Add the full text too as fallback
-    parts.push(text);
+    // If no separators were found, treat the entire text as a venue name
+    // (safe because text without separators doesn't contain author/publisher info)
+    if (parts.length === 0) {
+      const cleanedText = text.replace(/,\s*\d{4}\b.*$/, '').trim();
+      return [cleanedText, text].filter(Boolean);
+    }
 
     return [...new Set([...cleaned, ...parts])].filter(Boolean);
   }
@@ -175,7 +182,8 @@
     for (const text of venueTexts) {
       const parts = parseVenueParts(text);
       allVenueParts.push(...parts);
-      for (const part of [text, ...parts]) {
+      // Only extract abbreviations from parsed venue parts (not raw text with author names)
+      for (const part of parts) {
         for (const abbr of extractAbbreviations(part)) {
           allAbbrs.add(abbr);
         }
@@ -203,65 +211,65 @@
       }
     }
 
-    // === Strategy 3: Whole-word abbreviation search in text ===
-    const allText = venueTexts.join(' ').toUpperCase();
+    // === Strategy 3: Whole-word abbreviation search in venue parts only ===
+    // Use only parsed venue parts (author names excluded) to avoid false positives
+    const venuePartsText = allVenueParts.join(' ').toUpperCase();
     for (const abbr of Object.keys(CCF_ABBR_LOOKUP)) {
       if (abbr.length >= 3) {
         const regex = new RegExp('\\b' + abbr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b');
-        if (regex.test(allText)) {
+        if (regex.test(venuePartsText)) {
           return CCF_ABBR_LOOKUP[abbr];
         }
       }
     }
 
-    // === Strategy 4: Normalized full-name matching ===
+    // === Strategy 4: Exact normalized full-name matching ===
+    // & and 'and' are treated as equivalent
     for (const part of allVenueParts) {
       const normalized = normalizeName(part);
-      if (normalized.length > 5) {
-        // Exact normalized match
-        if (CCF_NAME_LOOKUP[normalized]) {
-          return CCF_NAME_LOOKUP[normalized];
-        }
+      if (normalized.length > 5 && CCF_NAME_LOOKUP[normalized]) {
+        return CCF_NAME_LOOKUP[normalized];
       }
-      if (normalized.length > 8) {
-        // Substring match (venue text contains or is contained in a known name)
-        for (const [key, value] of Object.entries(CCF_NAME_LOOKUP)) {
-          if (key.length > 8) {
-            if (normalized.includes(key) || key.includes(normalized)) {
-              return value;
-            }
-          }
+    }
+
+    // === Strategy 5: Comma-rearranged name matching ===
+    // Google Scholar sometimes inverts venue names: "Computers, IEEE Transactions on"
+    // Try rearranging: "X, Y" → "Y X"
+    for (const part of allVenueParts) {
+      const commaIdx = part.indexOf(',');
+      if (commaIdx > 0) {
+        const rearranged = part.substring(commaIdx + 1).trim() + ' ' + part.substring(0, commaIdx).trim();
+        const normalized = normalizeName(rearranged);
+        if (normalized.length > 5 && CCF_NAME_LOOKUP[normalized]) {
+          return CCF_NAME_LOOKUP[normalized];
         }
       }
     }
 
-    // === Strategy 5: Keyword-based fuzzy matching ===
-    const allTextLower = venueTexts.join(' ').toLowerCase();
-    const venueWords = allTextLower.match(/[a-z]{3,}/g) || [];
-    const stopwords = new Set(['the','and','for','with','from','its','vol','www','org','com','http','https','pdf']);
-    const venueKeywords = [...new Set(venueWords.filter(w => !stopwords.has(w)))];
-
-    if (venueKeywords.length >= 2 && typeof CCF_KEYWORD_LOOKUP !== 'undefined') {
-      let bestMatch = null;
-      let bestScore = 0;
-
-      for (const [keyStr, value] of Object.entries(CCF_KEYWORD_LOOKUP)) {
-        const entryKeywords = keyStr.split('|');
-        let matchCount = 0;
-        for (const kw of entryKeywords) {
-          if (venueKeywords.includes(kw)) matchCount++;
-        }
-        // Score = proportion of entry keywords found in venue text
-        const score = matchCount / entryKeywords.length;
-        // Require at least 50% keyword match AND at least 2 keywords matched
-        // Higher keyword count entries can match with lower percentage
-        const minScore = entryKeywords.length >= 4 ? 0.5 : 0.6;
-        if (score > minScore && matchCount >= 2 && score > bestScore) {
-          bestScore = score;
-          bestMatch = value;
+    // === Strategy 6: Suffix matching for truncated venue names ===
+    // When Scholar truncates the start: "… transactions on Computers" → "transactionsoncomputers"
+    // This is a suffix of "ieeetransactionsoncomputers" → safe to match
+    // Only used when match is UNIQUE (no ambiguity between different entries)
+    for (const part of allVenueParts) {
+      // Only try if the text appears truncated (starts with … or contains …)
+      if (part.includes('…') || part.includes('...')) {
+        const cleanPart = part.replace(/…/g, '').replace(/\.\.\./g, '').trim();
+        const normalized = normalizeName(cleanPart);
+        if (normalized.length > 10) {
+          let matchCount = 0;
+          let lastMatch = null;
+          for (const [key, value] of Object.entries(CCF_NAME_LOOKUP)) {
+            // Key must end with our normalized text, and our text must be >= 60% of key length
+            if (key.endsWith(normalized) && normalized.length / key.length >= 0.6) {
+              matchCount++;
+              lastMatch = value;
+              if (matchCount > 1) break; // Ambiguous, stop
+            }
+          }
+          // Only return if exactly one entry matched (unambiguous)
+          if (matchCount === 1) return lastMatch;
         }
       }
-      if (bestMatch) return bestMatch;
     }
 
     return null;
@@ -302,37 +310,116 @@
 
   /**
    * Create a summary stats bar.
+   * Counts badges directly from the DOM to stay accurate after async updates.
    */
   function createStatsBar() {
-    const existing = document.querySelector('.ccf-stats-bar');
-    if (existing) existing.remove();
+    isUpdatingDOM = true;
+    try {
+      // Count badges directly from the DOM
+      const resultBadges = document.querySelectorAll('.gs_r .ccf-badge, .gsc_a_tr .ccf-badge');
+      const counts = { total: 0, A: 0, B: 0, C: 0 };
+      const counted = new Set();
+      resultBadges.forEach(badge => {
+        const resultItem = badge.closest('.gs_r') || badge.closest('.gsc_a_tr');
+        if (resultItem && !counted.has(resultItem)) {
+          counted.add(resultItem);
+          counts.total++;
+          if (badge.classList.contains('ccf-badge-A')) counts.A++;
+          else if (badge.classList.contains('ccf-badge-B')) counts.B++;
+          else if (badge.classList.contains('ccf-badge-C')) counts.C++;
+        }
+      });
 
-    if (stats.total === 0) return;
+      const pendingHtml = pendingResolveCount > 0
+        ? `<span class="ccf-stats-pending">（${pendingResolveCount}篇识别中<span class="ccf-loading-dots"></span>）</span>`
+        : '';
 
-    const bar = document.createElement('div');
-    bar.className = 'ccf-stats-bar';
-    bar.innerHTML = `
-      <span class="ccf-stats-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><rect x="3" y="12" width="4" height="9" rx="1"/><rect x="10" y="7" width="4" height="14" rx="1"/><rect x="17" y="3" width="4" height="18" rx="1"/></svg></span>
-      <span>CCF标注: <span class="ccf-stats-count">${stats.total}</span> 篇</span>
-      <span class="ccf-stats-sep"></span>
-      ${stats.A > 0 ? `<span class="ccf-badge ccf-badge-A" style="font-size:11px;padding:1px 6px;">A×${stats.A}</span>` : ''}
-      ${stats.B > 0 ? `<span class="ccf-badge ccf-badge-B" style="font-size:11px;padding:1px 6px;">B×${stats.B}</span>` : ''}
-      ${stats.C > 0 ? `<span class="ccf-badge ccf-badge-C" style="font-size:11px;padding:1px 6px;">C×${stats.C}</span>` : ''}
-    `;
+      const content = `
+        <span class="ccf-stats-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:2px"><rect x="3" y="12" width="4" height="9" rx="1"/><rect x="10" y="7" width="4" height="14" rx="1"/><rect x="17" y="3" width="4" height="18" rx="1"/></svg></span>
+        <span>CCF标注: <span class="ccf-stats-count">${counts.total}</span> 篇${pendingHtml}</span>
+        <span class="ccf-stats-sep"></span>
+        ${counts.A > 0 ? `<span class="ccf-badge ccf-badge-A" style="font-size:11px;padding:1px 6px;">A×${counts.A}</span>` : ''}
+        ${counts.B > 0 ? `<span class="ccf-badge ccf-badge-B" style="font-size:11px;padding:1px 6px;">B×${counts.B}</span>` : ''}
+        ${counts.C > 0 ? `<span class="ccf-badge ccf-badge-C" style="font-size:11px;padding:1px 6px;">C×${counts.C}</span>` : ''}
+      `;
 
-    // Search results page: insert at top of results container
-    const searchContainer = document.querySelector('#gs_res_ccl_mid');
-    if (searchContainer) {
-      searchContainer.insertBefore(bar, searchContainer.firstChild);
-      return;
+      // Reuse existing bar if possible (just update innerHTML — no DOM insert/remove)
+      let bar = document.querySelector('.ccf-stats-bar');
+      if (bar) {
+        bar.innerHTML = content;
+        return;
+      }
+
+      // First time: create and insert the bar
+      bar = document.createElement('div');
+      bar.className = 'ccf-stats-bar';
+      bar.innerHTML = content;
+
+      const searchContainer = document.querySelector('#gs_res_ccl_mid');
+      if (searchContainer) {
+        searchContainer.insertBefore(bar, searchContainer.firstChild);
+        return;
+      }
+
+      const profileTable = document.querySelector('#gsc_a_t');
+      if (profileTable && profileTable.parentNode) {
+        bar.classList.add('ccf-stats-bar-profile');
+        profileTable.parentNode.insertBefore(bar, profileTable);
+      }
+    } finally {
+      isUpdatingDOM = false;
     }
+  }
 
-    // Profile page: insert before publications table as a sibling
-    const profileTable = document.querySelector('#gsc_a_t');
-    if (profileTable && profileTable.parentNode) {
-      bar.classList.add('ccf-stats-bar-profile');
-      profileTable.parentNode.insertBefore(bar, profileTable);
+  /**
+   * Fetch all candidate venue names from Google Scholar citation page.
+   * Used when the venue name is truncated (contains "…").
+   * @param {string} articleId - The article ID from the title link's id attribute.
+   * @returns {Promise<string[]>} Array of candidate venue names.
+   */
+  async function fetchVenueCandidates(articleId) {
+    if (!articleId) return [];
+    try {
+      const url = `/scholar?q=info:${articleId}:scholar.google.com/&output=cite&scirp=0&hl=en`;
+      const resp = await fetch(url);
+      if (!resp.ok) return [];
+      const html = await resp.text();
+
+      const candidates = [];
+      const seen = new Set();
+
+      // Extract all <i>...</i> texts (venue names in MLA/APA/Chicago formats)
+      const italicMatches = html.match(/<i>([^<]+)<\/i>/g) || [];
+      for (const m of italicMatches) {
+        const text = m.replace(/<\/?i>/g, '').trim();
+        // Skip very short matches or things that look like volume/issue numbers
+        if (text.length > 5 && !/^\d/.test(text) && !seen.has(text.toLowerCase())) {
+          seen.add(text.toLowerCase());
+          candidates.push(text);
+        }
+      }
+
+      // Also try BibTeX journal/booktitle field
+      const journalMatch = html.match(/(?:journal|booktitle)\s*=\s*\{([^}]+)\}/i);
+      if (journalMatch) {
+        const text = journalMatch[1].trim();
+        if (!seen.has(text.toLowerCase())) {
+          candidates.push(text);
+        }
+      }
+
+      return candidates;
+    } catch (e) {
+      console.log(`[CCF Rank] Failed to fetch citation for ${articleId}:`, e);
+      return [];
     }
+  }
+
+  /**
+   * Check if any venue text is truncated (contains "…").
+   */
+  function isVenueTruncated(venueTexts) {
+    return venueTexts.some(t => t.includes('…') || t.includes('...'));
   }
 
   /**
@@ -344,6 +431,9 @@
     // Google Scholar search result entries
     const resultItems = document.querySelectorAll('.gs_r.gs_or.gs_scl');
     
+    // Items that need async resolution (truncated venue names)
+    const pendingItems = [];
+
     resultItems.forEach(item => {
       if (processedElements.has(item)) return;
 
@@ -355,6 +445,7 @@
       const match = findCCFMatch(venueTexts);
       
       if (match) {
+        isUpdatingDOM = true;
         // Find the best element to attach the badge to
         // Prefer the compact source line (.gs_a.gs_fma_s), fallback to plain .gs_a
         let targetEl = item.querySelector('.gs_a.gs_fma_s') || item.querySelector('.gs_a');
@@ -374,6 +465,16 @@
         processedElements.add(item);
         stats.total++;
         stats[match.level]++;
+        isUpdatingDOM = false;
+      } else if (isVenueTruncated(venueTexts)) {
+        // Venue is truncated and no match found — queue for async resolution
+        // Use data-cid from the result container (the Google Scholar article ID)
+        const articleId = item.getAttribute('data-cid');
+        if (articleId) {
+          pendingItems.push({ item, articleId });
+          processedElements.add(item); // Mark as processed to prevent re-queuing
+          console.log(`[CCF Rank] Truncated venue detected, queued for citation fetch: ${articleId}`);
+        }
       }
     });
 
@@ -399,7 +500,78 @@
       }
     });
 
+    if (pendingItems.length > 0) {
+      pendingResolveCount += pendingItems.length;
+    }
     createStatsBar();
+
+    // Async resolution for truncated results
+    if (pendingItems.length > 0) {
+      resolveTruncatedVenues(pendingItems);
+    }
+  }
+
+  // Cache citation results to avoid re-fetching across processResults calls
+  const venueCache = {};
+
+  /**
+   * Resolve truncated venue names by fetching citation data.
+   * Processes items sequentially with randomized delays to avoid rate limiting.
+   */
+  async function resolveTruncatedVenues(items) {
+    let newMatches = 0;
+    for (const { item, articleId } of items) {
+
+      // Check cache first
+      let candidates;
+      if (venueCache[articleId]) {
+        candidates = venueCache[articleId];
+        console.log(`[CCF Rank] Cache hit for ${articleId}:`, candidates);
+      } else {
+        console.log(`[CCF Rank] Fetching citation for ${articleId}...`);
+        candidates = await fetchVenueCandidates(articleId);
+        venueCache[articleId] = candidates;
+        console.log(`[CCF Rank] Citation candidates for ${articleId}:`, candidates);
+      }
+
+      if (candidates.length > 0) {
+        // Try each candidate until we find a CCF match
+        let match = null;
+        for (const venue of candidates) {
+          match = findCCFMatch([venue]);
+          if (match) break;
+        }
+
+        if (match) {
+          isUpdatingDOM = true;
+          let targetEl = item.querySelector('.gs_a.gs_fma_s') || item.querySelector('.gs_a');
+          if (targetEl && !targetEl.querySelector('.ccf-badge')) {
+            targetEl.appendChild(createBadge(match));
+          }
+          const expandedEl = item.querySelector('.gs_fmaa');
+          if (expandedEl && !expandedEl.querySelector('.ccf-badge')) {
+            expandedEl.appendChild(createBadge(match));
+          }
+          isUpdatingDOM = false;
+          processedElements.add(item);
+          stats.total++;
+          stats[match.level]++;
+          newMatches++;
+        }
+      }
+
+      // Update pending count after each item
+      pendingResolveCount--;
+      createStatsBar();
+
+      // Randomized delay (800-1200ms) to mimic human-like behavior
+      const delay = 800 + Math.floor(Math.random() * 400);
+      await new Promise(r => setTimeout(r, delay));
+    }
+
+    if (newMatches > 0) {
+      console.log(`[CCF Rank] Resolved ${newMatches} truncated venues via citation lookup.`);
+    }
   }
 
   /**
@@ -409,6 +581,7 @@
     processResults();
 
     const observer = new MutationObserver((mutations) => {
+      if (isUpdatingDOM) return; // Ignore our own DOM changes
       let shouldProcess = false;
       for (const mutation of mutations) {
         if (mutation.addedNodes.length > 0) {
@@ -436,3 +609,4 @@
     init();
   }
 })();
+
