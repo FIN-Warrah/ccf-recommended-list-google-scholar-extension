@@ -14,6 +14,7 @@
   let stats = { total: 0, A: 0, B: 0, C: 0 };
   let processedElements = new WeakSet();
   let resolvingElements = new WeakSet();
+  let resolvingArticleIds = new Set();
   let isUpdatingDOM = false;
   let pendingResolveCount = 0; // Global pending counter for citation lookups
 
@@ -241,6 +242,7 @@
   }
 
   const CCF_NAME_CONFLICT_LOOKUP = buildNameConflictLookup();
+  const loggedAmbiguousVenueNames = new Set();
 
   function resolveNameLookup(normalized, venueParts, allAbbrs) {
     const conflictEntries = CCF_NAME_CONFLICT_LOOKUP.get(normalized);
@@ -268,7 +270,11 @@
       if (journalMatches.length === 1) return journalMatches[0];
     }
 
-    console.log('[CCF Rank] Ambiguous CCF venue name, skipped:', conflictEntries[0]?.full_name, conflictEntries.map(entry => entry.abbr));
+    const conflictKey = `${normalized}|${conflictEntries.map(entry => entry.abbr).join('|')}`;
+    if (!loggedAmbiguousVenueNames.has(conflictKey)) {
+      loggedAmbiguousVenueNames.add(conflictKey);
+      console.log('[CCF Rank] Ambiguous CCF venue name, skipped:', conflictEntries[0]?.full_name, conflictEntries.map(entry => entry.abbr));
+    }
     return null;
   }
 
@@ -770,6 +776,27 @@
     return badge;
   }
 
+  function attachBadgeToSearchResult(item, match) {
+    isUpdatingDOM = true;
+    try {
+      // Find the best element to attach the badge to.
+      // Prefer the compact source line (.gs_a.gs_fma_s), fallback to plain .gs_a.
+      let targetEl = item.querySelector('.gs_a.gs_fma_s') || item.querySelector('.gs_a');
+
+      if (targetEl && !targetEl.querySelector('.ccf-badge')) {
+        targetEl.appendChild(createBadge(match));
+      }
+
+      // Also add to expanded view if it exists.
+      const expandedEl = item.querySelector('.gs_fmaa');
+      if (expandedEl && !expandedEl.querySelector('.ccf-badge')) {
+        expandedEl.appendChild(createBadge(match));
+      }
+    } finally {
+      isUpdatingDOM = false;
+    }
+  }
+
   /**
    * Create a summary stats bar.
    * Counts badges directly from the DOM to stay accurate after async updates.
@@ -912,36 +939,38 @@
       const match = findCCFMatch(venueTexts);
       
       if (match) {
-        isUpdatingDOM = true;
-        // Find the best element to attach the badge to
-        // Prefer the compact source line (.gs_a.gs_fma_s), fallback to plain .gs_a
-        let targetEl = item.querySelector('.gs_a.gs_fma_s') || item.querySelector('.gs_a');
-        
-        if (targetEl && !targetEl.querySelector('.ccf-badge')) {
-          const badge = createBadge(match);
-          targetEl.appendChild(badge);
-        }
-
-        // Also add to expanded view if it exists
-        const expandedEl = item.querySelector('.gs_fmaa');
-        if (expandedEl && !expandedEl.querySelector('.ccf-badge')) {
-          const badge2 = createBadge(match);
-          expandedEl.appendChild(badge2);
-        }
-
+        attachBadgeToSearchResult(item, match);
         processedElements.add(item);
         stats.total++;
         stats[match.level]++;
-        isUpdatingDOM = false;
       } else if (isVenueTruncated(venueTexts)) {
         // Venue is truncated and no match found — queue for async resolution
         // Use data-cid from the result container (the Google Scholar article ID)
         const articleId = item.getAttribute('data-cid');
-        if (articleId && !resolvingElements.has(item)) {
+        if (!articleId) {
+          processedElements.add(item);
+          return;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(citationMatchCache, articleId)) {
+          const cachedMatch = citationMatchCache[articleId];
+          if (cachedMatch) {
+            attachBadgeToSearchResult(item, cachedMatch);
+            stats.total++;
+            stats[cachedMatch.level]++;
+          }
+          processedElements.add(item);
+          return;
+        }
+
+        if (!resolvingElements.has(item) && !resolvingArticleIds.has(articleId)) {
           pendingItems.push({ item, articleId });
           resolvingElements.add(item);
+          resolvingArticleIds.add(articleId);
           console.log(`[CCF Rank] Truncated venue detected, queued for citation fetch: ${articleId}`);
         }
+      } else {
+        processedElements.add(item);
       }
     });
 
@@ -980,6 +1009,7 @@
 
   // Cache citation results to avoid re-fetching across processResults calls
   const venueCache = {};
+  const citationMatchCache = {};
 
   /**
    * Resolve truncated venue names by fetching citation data.
@@ -990,6 +1020,7 @@
     for (const { item, articleId } of items) {
       if (item.querySelector('.ccf-badge')) {
         resolvingElements.delete(item);
+        resolvingArticleIds.delete(articleId);
         pendingResolveCount = Math.max(0, pendingResolveCount - 1);
         createStatsBar();
         continue;
@@ -1007,25 +1038,16 @@
         console.log(`[CCF Rank] Citation candidates for ${articleId}:`, candidates);
       }
 
+      // Try each candidate until we find a CCF match.
+      let match = null;
       if (candidates.length > 0) {
-        // Try each candidate until we find a CCF match
-        let match = null;
         for (const venue of candidates) {
           match = findCCFMatch([venue]);
           if (match) break;
         }
 
         if (match) {
-          isUpdatingDOM = true;
-          let targetEl = item.querySelector('.gs_a.gs_fma_s') || item.querySelector('.gs_a');
-          if (targetEl && !targetEl.querySelector('.ccf-badge')) {
-            targetEl.appendChild(createBadge(match));
-          }
-          const expandedEl = item.querySelector('.gs_fmaa');
-          if (expandedEl && !expandedEl.querySelector('.ccf-badge')) {
-            expandedEl.appendChild(createBadge(match));
-          }
-          isUpdatingDOM = false;
+          attachBadgeToSearchResult(item, match);
           processedElements.add(item);
           stats.total++;
           stats[match.level]++;
@@ -1033,8 +1055,12 @@
         }
       }
 
+      citationMatchCache[articleId] = match || null;
+      if (!match) processedElements.add(item);
+
       // Update pending count after each item
       resolvingElements.delete(item);
+      resolvingArticleIds.delete(articleId);
       pendingResolveCount = Math.max(0, pendingResolveCount - 1);
       createStatsBar();
 
