@@ -13,8 +13,57 @@
 
   let stats = { total: 0, A: 0, B: 0, C: 0 };
   let processedElements = new WeakSet();
+  let resolvingElements = new WeakSet();
   let isUpdatingDOM = false;
   let pendingResolveCount = 0; // Global pending counter for citation lookups
+
+  const OPTIONAL_KEYWORDS = new Set([
+    'conference', 'journal', 'transactions', 'transaction', 'proceedings',
+    'proceeding', 'symposium', 'workshop', 'ieee', 'acm',
+    'cvf'
+  ]);
+
+  const WORD_ALIASES = {
+    proc: ['proceedings'],
+    trans: ['transactions', 'transaction'],
+    transact: ['transactions', 'transaction'],
+    j: ['journal'],
+    jour: ['journal'],
+    conf: ['conference'],
+    intl: ['international'],
+    int: ['international'],
+    symp: ['symposium'],
+    sym: ['symposium'],
+    wkshp: ['workshop'],
+    comput: ['computer', 'computing'],
+    comp: ['computer', 'computing'],
+    commun: ['communication', 'communications'],
+    comm: ['communication', 'communications'],
+    syst: ['system', 'systems'],
+    sys: ['system', 'systems'],
+    graph: ['graphic', 'graphics'],
+    vis: ['vision', 'visualization'],
+    anal: ['analysis'],
+    mach: ['machine'],
+    intell: ['intelligence'],
+    learn: ['learning'],
+    lang: ['language', 'languages'],
+    softw: ['software'],
+    inf: ['information'],
+    inform: ['information'],
+    sci: ['science'],
+    technol: ['technology', 'technologies'],
+    appl: ['application', 'applications'],
+    netw: ['network', 'networks'],
+    distrib: ['distributed'],
+    med: ['medical']
+  };
+
+  const COMMON_WORD_ABBREVIATIONS = new Set([
+    'ALT', 'BIT', 'CAD', 'DAM', 'DATE', 'DIS', 'FAST', 'GROUP',
+    'HEALTH', 'IMAGE', 'MASS', 'PASTE', 'SAC', 'SAT', 'SEC',
+    'WINE', 'WISE'
+  ]);
 
   /**
    * Normalize text for name-based lookup.
@@ -27,6 +76,278 @@
       .replace(/[\s\-,:\/()'\.;]+/g, '')
       .replace(/[^a-z0-9]/g, '')
       .trim();
+  }
+
+  function stripAbbreviationNote(text) {
+    return (text || '')
+      .replace(/\s*[（(][^）)]*[）)]/g, '')
+      .trim();
+  }
+
+  function normalizeAbbreviation(text) {
+    return stripAbbreviationNote(text)
+      .toUpperCase()
+      .replace(/\s*([+\-\/&.])\s*/g, '$1')
+      .replace(/\s+/g, '')
+      .replace(/[^A-Z0-9+\-\/&.]/g, '');
+  }
+
+  function hasAbbreviationShape(text) {
+    const stripped = stripAbbreviationNote(text);
+    const compact = normalizeAbbreviation(stripped).replace(/[+\-\/&.]/g, '');
+    if (compact.length < 2 || compact.length > 20) return false;
+
+    const upperCount = (stripped.match(/[A-Z]/g) || []).length;
+    const lowerCount = (stripped.match(/[a-z]/g) || []).length;
+    const hasSeparator = /[+\-\/&.]/.test(stripped);
+
+    return /^[A-Z0-9\s+\-\/&.]+$/.test(stripped) ||
+      hasSeparator ||
+      (upperCount >= 2 && lowerCount > 0);
+  }
+
+  function isCommonWordAbbreviation(abbr) {
+    return COMMON_WORD_ABBREVIATIONS.has(normalizeAbbreviation(abbr));
+  }
+
+  function containsExplicitAbbreviation(venueParts, abbr) {
+    const normalizedTarget = normalizeAbbreviation(abbr);
+    if (!normalizedTarget) return false;
+
+    const escaped = (abbr || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const boundaryRegex = escaped
+      ? new RegExp('\\b' + escaped + '\\b', 'g')
+      : null;
+
+    return venueParts.some(part => {
+      if (normalizeAbbreviation(part) === normalizedTarget) return true;
+
+      const extracted = extractAbbreviations(part)
+        .some(candidate => normalizeAbbreviation(candidate) === normalizedTarget);
+      if (extracted) return true;
+
+      if (!boundaryRegex) return false;
+      boundaryRegex.lastIndex = 0;
+      let match;
+      while ((match = boundaryRegex.exec(part)) !== null) {
+        if (hasAbbreviationShape(match[0])) return true;
+      }
+
+      return false;
+    });
+  }
+
+  function isLikelyAbbreviationEntry(entry) {
+    return hasAbbreviationShape(entry?.abbr || '');
+  }
+
+  function buildAbbreviationAliasLookup() {
+    const aliases = new Map();
+
+    for (const [key, entry] of Object.entries(CCF_ABBR_LOOKUP)) {
+      if (!isLikelyAbbreviationEntry(entry)) continue;
+
+      const aliasKeys = [
+        key,
+        entry.abbr,
+        stripAbbreviationNote(key),
+        stripAbbreviationNote(entry.abbr),
+      ];
+
+      for (const alias of aliasKeys) {
+        const normalized = normalizeAbbreviation(alias);
+        if (!normalized) continue;
+
+        const existing = aliases.get(normalized);
+        if (!existing) {
+          aliases.set(normalized, entry);
+        } else if (existing.full_name !== entry.full_name || existing.level !== entry.level) {
+          aliases.set(normalized, null);
+        }
+      }
+    }
+
+    return aliases;
+  }
+
+  const CCF_ABBR_ALIAS_LOOKUP = buildAbbreviationAliasLookup();
+
+  function buildExactAbbreviationNameLookup() {
+    const names = new Map();
+
+    for (const entry of Object.values(CCF_ABBR_LOOKUP)) {
+      const normalized = normalizeName(entry.abbr || '');
+      if (!normalized) continue;
+
+      const existing = names.get(normalized);
+      if (!existing) {
+        names.set(normalized, entry);
+      } else if (existing.full_name !== entry.full_name || existing.level !== entry.level || existing.type !== entry.type) {
+        names.set(normalized, null);
+      }
+    }
+
+    return names;
+  }
+
+  const CCF_EXACT_ABBR_NAME_LOOKUP = buildExactAbbreviationNameLookup();
+
+  function buildSpecialNameLookup() {
+    const aliases = new Map();
+    const addAlias = (alias, canonicalName) => {
+      const entry = CCF_NAME_LOOKUP[normalizeName(canonicalName)];
+      if (entry) aliases.set(normalizeName(alias), entry);
+    };
+
+    addAlias('The Web Conference', 'International World Wide Web Conference');
+
+    return aliases;
+  }
+
+  const CCF_SPECIAL_NAME_LOOKUP = buildSpecialNameLookup();
+
+  function buildNameConflictLookup() {
+    const grouped = new Map();
+
+    for (const entry of Object.values(CCF_ABBR_LOOKUP)) {
+      const normalized = normalizeName(entry.full_name || '');
+      if (!normalized) continue;
+
+      if (!grouped.has(normalized)) grouped.set(normalized, []);
+      const entries = grouped.get(normalized);
+      const key = `${entry.abbr}|${entry.level}|${entry.type}|${entry.category}|${entry.full_name}`;
+      if (!entries.some(existing => `${existing.abbr}|${existing.level}|${existing.type}|${existing.category}|${existing.full_name}` === key)) {
+        entries.push(entry);
+      }
+    }
+
+    const conflicts = new Map();
+    for (const [normalized, entries] of grouped.entries()) {
+      const distinct = new Set(entries.map(entry => `${entry.abbr}|${entry.level}|${entry.type}|${entry.category}`));
+      if (distinct.size > 1) conflicts.set(normalized, entries);
+    }
+
+    return conflicts;
+  }
+
+  const CCF_NAME_CONFLICT_LOOKUP = buildNameConflictLookup();
+
+  function resolveNameLookup(normalized, venueParts, allAbbrs) {
+    const conflictEntries = CCF_NAME_CONFLICT_LOOKUP.get(normalized);
+    if (!conflictEntries) {
+      return CCF_NAME_LOOKUP[normalized] || CCF_SPECIAL_NAME_LOOKUP.get(normalized) || null;
+    }
+
+    const abbrs = [...allAbbrs].map(normalizeAbbreviation);
+    const abbrMatch = conflictEntries.find(entry => abbrs.includes(normalizeAbbreviation(entry.abbr)));
+    if (abbrMatch) return abbrMatch;
+
+    const hasConferenceCue = venueParts.some(part => {
+      return /\b(proceedings?|conferences?|conf\.?|symposium|workshops?)\b/i.test(part);
+    });
+    if (hasConferenceCue) {
+      const conferenceMatches = conflictEntries.filter(entry => entry.type === 'conference');
+      if (conferenceMatches.length === 1) return conferenceMatches[0];
+    }
+
+    const hasJournalCue = venueParts.some(part => {
+      return /\b(journals?|vol\.?|volume|issue|no\.)\b/i.test(part);
+    });
+    if (hasJournalCue) {
+      const journalMatches = conflictEntries.filter(entry => entry.type === 'journal');
+      if (journalMatches.length === 1) return journalMatches[0];
+    }
+
+    console.log('[CCF Rank] Ambiguous CCF venue name, skipped:', conflictEntries[0]?.full_name, conflictEntries.map(entry => entry.abbr));
+    return null;
+  }
+
+  function hasNonMainVenueQualifier(entry, venueParts) {
+    const entryName = (entry?.full_name || '').toLowerCase();
+    const checks = [
+      [/\bworkshops?\b/i, /\bworkshops?\b/i],
+      [/\badjunct\b/i, /\badjunct\b/i],
+      [/\bcompanion\b/i, /\bcompanion\b/i],
+      [/\bextended\s+abstracts?\b/i, /\bextended\s+abstracts?\b/i],
+      [/\bposters?\b/i, /\bposters?\b/i],
+      [/\bdemos?\b|\bdemonstrations?\b/i, /\bdemos?\b|\bdemonstrations?\b/i],
+      [/\btutorials?\b/i, /\btutorials?\b/i],
+      [/\bdoctoral\s+consortium\b/i, /\bdoctoral\s+consortium\b/i]
+    ];
+
+    return venueParts.some(part => {
+      return checks.some(([venueRegex, entryRegex]) => {
+        return venueRegex.test(part) && !entryRegex.test(entryName);
+      });
+    });
+  }
+
+  function addWordVariant(words, word) {
+    if (!word || word.length < 2) return;
+
+    words.add(word);
+
+    const aliases = WORD_ALIASES[word];
+    if (aliases) {
+      aliases.forEach(alias => words.add(alias));
+    }
+
+    if (word.endsWith('ies') && word.length > 4) {
+      words.add(word.slice(0, -3) + 'y');
+    } else if (word.endsWith('s') && !word.endsWith('ss') && !word.endsWith('sis') && word.length > 4) {
+      words.add(word.slice(0, -1));
+    } else if (!word.endsWith('s') && word.length > 3) {
+      words.add(word + 's');
+    }
+  }
+
+  function extractVenueWords(text) {
+    const words = new Set();
+    if (!text) return words;
+
+    const tokens = text
+      .toLowerCase()
+      .replace(/&/g, ' and ')
+      .replace(/[’']/g, '')
+      .replace(/…|\.\.\./g, ' ')
+      .replace(/\b\d{4}\b/g, ' ')
+      .replace(/\b\d+(st|nd|rd|th)\b/g, ' ')
+      .split(/[^a-z0-9]+/)
+      .filter(Boolean);
+
+    const stopWords = new Set([
+      'a', 'an', 'the', 'of', 'on', 'in', 'and', 'or', 'for', 'to', 'with',
+      'from', 'by', 'at', 'via', 'using', 'based', 'vol', 'volume', 'no',
+      'issue', 'pp', 'pages', 'page'
+    ]);
+
+    for (const token of tokens) {
+      if (!stopWords.has(token)) {
+        addWordVariant(words, token);
+      }
+    }
+
+    return words;
+  }
+
+  function getVenueNameVariants(part) {
+    const variants = new Set();
+    const trimmed = (part || '').trim();
+    if (!trimmed) return [];
+
+    variants.add(trimmed);
+
+    const withoutProceedings = trimmed
+      .replace(/^(?:proceedings|proc)\.?\s+(?:of\s+)?(?:the\s+)?/i, '')
+      .trim();
+    if (withoutProceedings) variants.add(withoutProceedings);
+
+    const withoutLeadingYear = withoutProceedings
+      .replace(/^\d{4}\s+/, '')
+      .trim();
+    if (withoutLeadingYear) variants.add(withoutLeadingYear);
+
+    return [...variants];
   }
 
   /**
@@ -142,18 +463,34 @@
   function extractAbbreviations(text) {
     if (!text) return [];
     const candidates = new Set();
+
+    const compoundMatches = text.match(/\b[A-Za-z0-9]+(?:\s*[+\-\/]\s*[A-Za-z0-9]+)+\b/g);
+    if (compoundMatches) {
+      for (const match of compoundMatches) {
+        const spaced = match.replace(/\s+/g, ' ').trim().toUpperCase();
+        const compact = match.replace(/\s*([+\-\/])\s*/g, '$1').toUpperCase();
+        if (spaced.length <= 25) candidates.add(spaced);
+        if (compact.length <= 25) candidates.add(compact);
+      }
+    }
+
+    const dottedMatches = text.match(/\b[A-Z][A-Z0-9]*(?:\.[A-Z0-9]+)+\b/g);
+    if (dottedMatches) {
+      for (const match of dottedMatches) {
+        if (match.length <= 25) candidates.add(match.toUpperCase());
+      }
+    }
     
     // Find uppercase abbreviation-like tokens (2-15 chars)
     const tokens = text.split(/[\s,\-–—·.()\/]+/);
     for (const token of tokens) {
       const trimmed = token.trim();
-      const upper = trimmed.toUpperCase();
       // Match pure uppercase tokens (TC, TPDS, SIGCOMM, etc.)
-      if (upper && /^[A-Z][A-Z0-9\-\/&]{1,14}$/.test(upper)) {
-        candidates.add(upper);
+      if (trimmed && /^[A-Z][A-Z0-9\-\/&]{1,14}$/.test(trimmed)) {
+        candidates.add(trimmed.toUpperCase());
       }
       // Also try the original token as-is if it looks like an abbreviation (NeurIPS, EuroSys)
-      if (trimmed.length >= 2 && trimmed.length <= 15 && /^[A-Z]/.test(trimmed)) {
+      if (trimmed.length >= 2 && trimmed.length <= 15 && /^[A-Z]/.test(trimmed) && /[A-Z].*[A-Z]/.test(trimmed)) {
         candidates.add(trimmed.toUpperCase());
       }
     }
@@ -169,6 +506,20 @@
     return [...candidates];
   }
 
+  function lookupAbbreviation(abbr, venueParts) {
+    const entry = CCF_ABBR_LOOKUP[abbr] ||
+      CCF_ABBR_LOOKUP[abbr.toUpperCase()] ||
+      CCF_ABBR_ALIAS_LOOKUP.get(normalizeAbbreviation(abbr));
+
+    if (!entry) return null;
+    if (hasNonMainVenueQualifier(entry, venueParts)) return null;
+    if (isLikelyAbbreviationEntry(entry)) return entry;
+
+    const entryAbbr = normalizeAbbreviation(entry.abbr);
+    const exactPartMatch = venueParts.some(part => normalizeAbbreviation(part) === entryAbbr);
+    return exactPartMatch ? entry : null;
+  }
+
   /**
    * Try to find a CCF match for the given venue text fragments.
    */
@@ -181,72 +532,98 @@
 
     for (const text of venueTexts) {
       const parts = parseVenueParts(text);
-      allVenueParts.push(...parts);
-      // Only extract abbreviations from parsed venue parts (not raw text with author names)
       for (const part of parts) {
-        for (const abbr of extractAbbreviations(part)) {
-          allAbbrs.add(abbr);
+        const variants = getVenueNameVariants(part);
+        allVenueParts.push(...variants);
+        // Only extract abbreviations from parsed venue parts (not raw text with author names)
+        for (const variant of variants) {
+          for (const abbr of extractAbbreviations(variant)) {
+            allAbbrs.add(abbr);
+          }
         }
       }
     }
 
-    // === Strategy 1: Direct abbreviation lookup ===
-    for (const abbr of allAbbrs) {
-      if (CCF_ABBR_LOOKUP[abbr]) {
-        return CCF_ABBR_LOOKUP[abbr];
+    // === Strategy 1: Exact normalized full-name matching ===
+    // & and 'and' are treated as equivalent. Full names must win over
+    // abbreviations embedded inside them (e.g. "The VLDB Journal" vs "VLDB").
+    for (const part of allVenueParts) {
+      if (part.includes('…') || part.includes('...')) continue;
+      const normalized = normalizeName(part);
+      if (normalized.length > 5) {
+        const match = resolveNameLookup(normalized, allVenueParts, allAbbrs);
+        if (match) return match;
       }
     }
 
-    // === Strategy 2: Abbreviation with variations ===
+    // === Strategy 2: Exact abbreviation/name matching ===
+    // Some CCF venues use name-like abbreviations (e.g. Middleware, Eurographics).
+    // Match them only when the parsed venue field is exactly that name.
+    for (const part of allVenueParts) {
+      if (part.includes('…') || part.includes('...')) continue;
+      const normalized = normalizeName(part);
+      const match = CCF_EXACT_ABBR_NAME_LOOKUP.get(normalized);
+      if (match && !hasNonMainVenueQualifier(match, allVenueParts)) return match;
+    }
+
+    // === Strategy 3: Comma-rearranged name matching ===
+    // Google Scholar sometimes inverts venue names: "Computers, IEEE Transactions on"
+    // Try rearranging: "X, Y" → "Y X"
+    for (const part of allVenueParts) {
+      if (part.includes('…') || part.includes('...')) continue;
+      const commaIdx = part.indexOf(',');
+      if (commaIdx > 0) {
+        const rearranged = part.substring(commaIdx + 1).trim() + ' ' + part.substring(0, commaIdx).trim();
+        const normalized = normalizeName(rearranged);
+        if (normalized.length > 5) {
+          const match = resolveNameLookup(normalized, allVenueParts, allAbbrs);
+          if (match) return match;
+        }
+      }
+    }
+
+    // === Strategy 4: Direct abbreviation lookup ===
+    for (const abbr of allAbbrs) {
+      const match = lookupAbbreviation(abbr, allVenueParts);
+      if (match) return match;
+    }
+
+    // === Strategy 5: Abbreviation with variations ===
     for (const abbr of allAbbrs) {
       const variations = [
+        normalizeAbbreviation(abbr),
         abbr.replace(/-/g, ''),
         abbr + 'S',
         abbr.replace(/S$/, ''),
       ];
       for (const v of variations) {
-        if (v !== abbr && CCF_ABBR_LOOKUP[v]) {
-          return CCF_ABBR_LOOKUP[v];
-        }
+        if (v === abbr) continue;
+        const match = lookupAbbreviation(v, allVenueParts);
+        if (match) return match;
       }
     }
 
-    // === Strategy 3: Whole-word abbreviation search in venue parts only ===
+    // === Strategy 6: Whole-word abbreviation search in venue parts only ===
     // Use only parsed venue parts (author names excluded) to avoid false positives
     const venuePartsText = allVenueParts.join(' ').toUpperCase();
-    for (const abbr of Object.keys(CCF_ABBR_LOOKUP)) {
-      if (abbr.length >= 3) {
+    for (const [abbr, entry] of Object.entries(CCF_ABBR_LOOKUP)) {
+      if (abbr.length >= 3 && isLikelyAbbreviationEntry(entry)) {
+        if (hasNonMainVenueQualifier(entry, allVenueParts)) continue;
+        if (
+          (isCommonWordAbbreviation(abbr) || isCommonWordAbbreviation(entry.abbr)) &&
+          !containsExplicitAbbreviation(allVenueParts, abbr) &&
+          !containsExplicitAbbreviation(allVenueParts, entry.abbr)
+        ) {
+          continue;
+        }
         const regex = new RegExp('\\b' + abbr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b');
         if (regex.test(venuePartsText)) {
-          return CCF_ABBR_LOOKUP[abbr];
+          return entry;
         }
       }
     }
 
-    // === Strategy 4: Exact normalized full-name matching ===
-    // & and 'and' are treated as equivalent
-    for (const part of allVenueParts) {
-      const normalized = normalizeName(part);
-      if (normalized.length > 5 && CCF_NAME_LOOKUP[normalized]) {
-        return CCF_NAME_LOOKUP[normalized];
-      }
-    }
-
-    // === Strategy 5: Comma-rearranged name matching ===
-    // Google Scholar sometimes inverts venue names: "Computers, IEEE Transactions on"
-    // Try rearranging: "X, Y" → "Y X"
-    for (const part of allVenueParts) {
-      const commaIdx = part.indexOf(',');
-      if (commaIdx > 0) {
-        const rearranged = part.substring(commaIdx + 1).trim() + ' ' + part.substring(0, commaIdx).trim();
-        const normalized = normalizeName(rearranged);
-        if (normalized.length > 5 && CCF_NAME_LOOKUP[normalized]) {
-          return CCF_NAME_LOOKUP[normalized];
-        }
-      }
-    }
-
-    // === Strategy 6: Suffix matching for truncated venue names ===
+    // === Strategy 7: Suffix matching for truncated venue names ===
     // When Scholar truncates the start: "… transactions on Computers" → "transactionsoncomputers"
     // This is a suffix of "ieeetransactionsoncomputers" → safe to match
     // Only used when match is UNIQUE (no ambiguity between different entries)
@@ -255,12 +632,21 @@
       if (part.includes('…') || part.includes('...')) {
         const cleanPart = part.replace(/…/g, '').replace(/\.\.\./g, '').trim();
         const normalized = normalizeName(cleanPart);
+        const hasVenueDesignator = /\b(transactions?|journal|conference|symposium|workshop|proceedings?)\b/i.test(cleanPart);
+        const coreWordCount = cleanPart
+          .toLowerCase()
+          .split(/[^a-z0-9]+/)
+          .filter(word => word && !['a', 'an', 'the', 'of', 'on', 'in', 'and', 'or', 'for', 'to', 'with'].includes(word))
+          .length;
+        if (!hasVenueDesignator && coreWordCount < 3) continue;
+
         if (normalized.length > 10) {
           let matchCount = 0;
           let lastMatch = null;
           for (const [key, value] of Object.entries(CCF_NAME_LOOKUP)) {
-            // Key must end with our normalized text, and our text must be >= 60% of key length
-            if (key.endsWith(normalized) && normalized.length / key.length >= 0.6) {
+            // Key must end with our normalized text, and our text must be a meaningful portion of the full key.
+            const minCoverage = hasVenueDesignator ? 0.45 : 0.6;
+            if (key.length > normalized.length && key.endsWith(normalized) && normalized.length / key.length >= minCoverage) {
               matchCount++;
               lastMatch = value;
               if (matchCount > 1) break; // Ambiguous, stop
@@ -270,6 +656,70 @@
           if (matchCount === 1) return lastMatch;
         }
       }
+    }
+
+    // === Strategy 8: High-confidence keyword matching ===
+    // Handles Scholar variants like "Proceedings of the IEEE/CVF Conference on ..."
+    // and common abbreviated journal names like "IEEE Trans. Pattern Anal. Mach. Intell."
+    const keywordMatches = [];
+    for (const part of allVenueParts) {
+      const words = extractVenueWords(part);
+      if (words.size < 2) continue;
+
+      for (const [keywordKey, entry] of Object.entries(CCF_KEYWORD_LOOKUP)) {
+        let matchEntry = entry;
+        const conflictingName = normalizeName(entry.full_name || '');
+        if (CCF_NAME_CONFLICT_LOOKUP.has(conflictingName)) {
+          const resolved = resolveNameLookup(conflictingName, allVenueParts, allAbbrs);
+          if (!resolved) continue;
+          matchEntry = resolved;
+        }
+        if (hasNonMainVenueQualifier(matchEntry, [part])) continue;
+
+        const keyWords = keywordKey.split('|').filter(Boolean);
+        if (keyWords.length < 2) continue;
+
+        const matched = keyWords.filter(word => words.has(word));
+        const missing = keyWords.filter(word => !words.has(word));
+        const distinctiveWords = keyWords.filter(word => !OPTIONAL_KEYWORDS.has(word));
+        if (distinctiveWords.length < 3) continue;
+
+        const matchedDistinctive = distinctiveWords.filter(word => words.has(word));
+
+        const coverage = matched.length / keyWords.length;
+        const distinctiveCoverage = distinctiveWords.length === 0
+          ? 1
+          : matchedDistinctive.length / distinctiveWords.length;
+        const onlyOptionalMissing = missing.every(word => OPTIONAL_KEYWORDS.has(word));
+
+        const isStrongMatch =
+          coverage === 1 ||
+          (coverage >= 0.8 && distinctiveCoverage === 1 && onlyOptionalMissing);
+
+        if ((part.includes('…') || part.includes('...')) && matchedDistinctive.length < 4) {
+          continue;
+        }
+
+        if (isStrongMatch && matchedDistinctive.length >= 2) {
+          keywordMatches.push({
+            entry: matchEntry,
+            score: matched.length * 100 + matchedDistinctive.length * 10 + coverage,
+            keyLength: keyWords.length
+          });
+        }
+      }
+    }
+
+    if (keywordMatches.length > 0) {
+      keywordMatches.sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return b.keyLength - a.keyLength;
+      });
+
+      const best = keywordMatches[0];
+      const tied = keywordMatches.filter(match => match.score === best.score);
+      const sameVenue = tied.every(match => match.entry.abbr === best.entry.abbr);
+      if (sameVenue) return best.entry;
     }
 
     return null;
@@ -379,9 +829,12 @@
    */
   async function fetchVenueCandidates(articleId) {
     if (!articleId) return [];
+    let timeoutId = null;
     try {
       const url = `/scholar?q=info:${articleId}:scholar.google.com/&output=cite&scirp=0&hl=en`;
-      const resp = await fetch(url);
+      const controller = new AbortController();
+      timeoutId = setTimeout(() => controller.abort(), 6000);
+      const resp = await fetch(url, { signal: controller.signal });
       if (!resp.ok) return [];
       const html = await resp.text();
 
@@ -412,6 +865,8 @@
     } catch (e) {
       console.log(`[CCF Rank] Failed to fetch citation for ${articleId}:`, e);
       return [];
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
     }
   }
 
@@ -470,9 +925,9 @@
         // Venue is truncated and no match found — queue for async resolution
         // Use data-cid from the result container (the Google Scholar article ID)
         const articleId = item.getAttribute('data-cid');
-        if (articleId) {
+        if (articleId && !resolvingElements.has(item)) {
           pendingItems.push({ item, articleId });
-          processedElements.add(item); // Mark as processed to prevent re-queuing
+          resolvingElements.add(item);
           console.log(`[CCF Rank] Truncated venue detected, queued for citation fetch: ${articleId}`);
         }
       }
@@ -521,6 +976,12 @@
   async function resolveTruncatedVenues(items) {
     let newMatches = 0;
     for (const { item, articleId } of items) {
+      if (item.querySelector('.ccf-badge')) {
+        resolvingElements.delete(item);
+        pendingResolveCount = Math.max(0, pendingResolveCount - 1);
+        createStatsBar();
+        continue;
+      }
 
       // Check cache first
       let candidates;
@@ -561,7 +1022,8 @@
       }
 
       // Update pending count after each item
-      pendingResolveCount--;
+      resolvingElements.delete(item);
+      pendingResolveCount = Math.max(0, pendingResolveCount - 1);
       createStatsBar();
 
       // Randomized delay (800-1200ms) to mimic human-like behavior
@@ -609,4 +1071,3 @@
     init();
   }
 })();
-
