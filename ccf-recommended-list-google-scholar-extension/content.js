@@ -65,6 +65,12 @@
     'WINE', 'WISE'
   ]);
 
+  const ROMAN_NUMERAL_TOKENS = new Set([
+    'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X',
+    'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII',
+    'XIX', 'XX'
+  ]);
+
   /**
    * Normalize text for name-based lookup.
    * Strips all spaces, punctuation, and lowercases - must match the key format in CCF_NAME_LOOKUP.
@@ -108,6 +114,10 @@
 
   function isCommonWordAbbreviation(abbr) {
     return COMMON_WORD_ABBREVIATIONS.has(normalizeAbbreviation(abbr));
+  }
+
+  function isRomanNumeralToken(text) {
+    return ROMAN_NUMERAL_TOKENS.has(normalizeAbbreviation(text));
   }
 
   function containsExplicitAbbreviation(venueParts, abbr) {
@@ -485,6 +495,7 @@
     const tokens = text.split(/[\s,\-–—·.()\/]+/);
     for (const token of tokens) {
       const trimmed = token.trim();
+      if (isRomanNumeralToken(trimmed)) continue;
       // Match pure uppercase tokens (TC, TPDS, SIGCOMM, etc.)
       if (trimmed && /^[A-Z][A-Z0-9\-\/&]{1,14}$/.test(trimmed)) {
         candidates.add(trimmed.toUpperCase());
@@ -499,6 +510,7 @@
     const mixedCase = text.match(/\b[A-Z][A-Za-z]*[A-Z]+[A-Za-z]*\b/g);
     if (mixedCase) {
       for (const m of mixedCase) {
+        if (isRomanNumeralToken(m)) continue;
         candidates.add(m.toUpperCase());
       }
     }
